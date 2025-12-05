@@ -71,12 +71,15 @@ export function WikiEditor() {
     }
   }, [title, body, isNew]);
   useEffect(() => {
+    const toastId = 'dirty-toast';
     if (isDirty) {
-      toast.info('Unsaved changes', { duration: 2000, id: 'dirty-toast' });
+      toast.info('Unsaved changes', { duration: 2000, id: toastId });
     } else {
-      toast.dismiss('dirty-toast');
+      toast.dismiss(toastId);
     }
-    return () => toast.dismiss('dirty-toast');
+    return () => {
+      toast.dismiss(toastId);
+    };
   }, [isDirty]);
   const mutation = useMutation({
     mutationFn: (updatedDoc: Partial<Document> & { id?: string }) => {
@@ -119,9 +122,10 @@ export function WikiEditor() {
       if (!res.ok) throw new Error('Export failed');
       if (format === 'md') {
         const data = await res.json();
-        return { blob: new Blob([data.content], { type: 'text/markdown;charset=utf-8' }), format };
+        return { blob: new Blob([data.data.content], { type: 'text/markdown;charset=utf-8' }), format };
       }
-      return { blob: await res.blob(), format };
+      const data = await res.json();
+      return { blob: new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }), format };
     },
     onSuccess: ({ blob, format }) => {
       saveAs(blob, `${title}.${format}`);

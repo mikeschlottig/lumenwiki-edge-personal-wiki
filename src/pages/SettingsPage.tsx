@@ -9,6 +9,7 @@ import { saveAs } from 'file-saver';
 import { toast } from 'sonner';
 import { useState, useMemo } from 'react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
+import { Skeleton } from '@/components/ui/skeleton';
 const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042'];
 export function SettingsPage() {
   const [isExporting, setIsExporting] = useState<'json' | 'md' | null>(null);
