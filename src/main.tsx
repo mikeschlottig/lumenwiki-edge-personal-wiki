@@ -12,8 +12,10 @@ import { LeftVault } from "@/components/wiki/LeftVault";
 import { HomePage } from '@/pages/HomePage';
 import { WikiEditor } from '@/pages/WikiEditor';
 import { ImportPage } from '@/pages/ImportPage';
+import { SettingsPage } from '@/pages/SettingsPage';
 import '@/index.css';
 const queryClient = new QueryClient();
+// eslint-disable-next-line react-refresh/only-export-components
 const AppContainer = ({ children }: { children: React.ReactNode }) => (
   <SidebarProvider>
     <LeftVault />
@@ -36,6 +38,11 @@ const router = createBrowserRouter([
   {
     path: "/import",
     element: <AppContainer><ImportPage /></AppContainer>,
+    errorElement: <RouteErrorBoundary />,
+  },
+  {
+    path: "/settings",
+    element: <AppContainer><SettingsPage /></AppContainer>,
     errorElement: <RouteErrorBoundary />,
   },
 ]);
