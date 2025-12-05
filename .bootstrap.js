@@ -84,7 +84,8 @@ function runSetupCommands() {
     "bun add compromise@^14.0.0",
     "bun add react-dropzone@^14.2.3",
     "bun add file-saver@^2.0.5",
-    "bun add jszip@^3.10.1"
+    "bun add jszip@^3.10.1",
+    "bun install recharts@2.15.4"
 ];
     
     if (commands.length === 0) {
