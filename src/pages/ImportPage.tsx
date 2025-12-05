@@ -14,6 +14,46 @@ import { toast } from 'sonner';
 import { Upload, ClipboardPaste, Link as LinkIcon, Loader2, CheckCircle, XCircle } from 'lucide-react';
 import { extractTags } from '@/lib/worker-nlp';
 import { ImportPreview, PreviewItem } from '@/components/wiki/ImportPreview';
+import nlp from 'compromise';
+const similarity = (s1: string, s2: string) => {
+  let longer = s1;
+  let shorter = s2;
+  if (s1.length < s2.length) {
+    longer = s2;
+    shorter = s1;
+  }
+  const longerLength = longer.length;
+  if (longerLength === 0) {
+    return 1.0;
+  }
+  return (longerLength - editDistance(longer, shorter)) / longerLength;
+};
+const editDistance = (s1: string, s2: string) => {
+  s1 = s1.toLowerCase();
+  s2 = s2.toLowerCase();
+  const costs = [];
+  for (let i = 0; i <= s1.length; i++) {
+    let lastValue = i;
+    for (let j = 0; j <= s2.length; j++) {
+      if (i === 0) {
+        costs[j] = j;
+      } else {
+        if (j > 0) {
+          let newValue = costs[j - 1];
+          if (s1.charAt(i - 1) !== s2.charAt(j - 1)) {
+            newValue = Math.min(Math.min(newValue, lastValue), costs[j]) + 1;
+          }
+          costs[j - 1] = lastValue;
+          lastValue = newValue;
+        }
+      }
+    }
+    if (i > 0) {
+      costs[s2.length] = lastValue;
+    }
+  }
+  return costs[s2.length];
+};
 export function ImportPage() {
   const [pasteContent, setPasteContent] = useState('');
   const [urls, setUrls] = useState('');
@@ -36,16 +76,21 @@ export function ImportPage() {
     onError: (error) => toast.error(`Import failed: ${error.message}`),
   });
   const createPreviews = useCallback((items: { title: string; body: string; origin?: string }[]): PreviewItem[] => {
-    const existingTitles = new Set(existingDocs?.map(doc => doc.title.toLowerCase()));
-    return items.map(item => ({
-      id: uuidv4(),
-      title: item.title,
-      body: item.body,
-      origin: item.origin,
-      tags: extractTags(`${item.title}\n${item.body}`),
-      isDuplicate: existingTitles.has(item.title.toLowerCase()),
-      selected: true,
-    }));
+    return items.map(item => {
+      const isDuplicate = existingDocs?.some(doc => similarity(doc.title, item.title) > 0.8) ?? false;
+      const baseTags = extractTags(`${item.title}\n${item.body}`);
+      const topicTags = nlp(item.title + ' ' + item.body).topics().out('array').slice(0, 3);
+      const combined = Array.from(new Set([...baseTags, ...topicTags]));
+      return {
+        id: uuidv4(),
+        title: item.title,
+        body: item.body,
+        origin: item.origin,
+        tags: combined,
+        isDuplicate,
+        selected: true,
+      };
+    });
   }, [existingDocs]);
   const onDrop = useCallback((acceptedFiles: File[]) => {
     setIsProcessing(true);
@@ -80,8 +125,6 @@ export function ImportPage() {
   const handleUrlPreview = () => {
     const urlList = urls.split(/[\n,]+/).map(u => u.trim()).filter(Boolean);
     if (!urlList.length) return toast.warning('Please enter at least one URL.');
-    // For this phase, we'll simulate the preview client-side.
-    // A full implementation would call a backend endpoint to fetch and parse.
     toast.info("URL import processing will be handled by the worker. This is a client-side preview.");
     const urlPreviews = urlList.map(url => ({
         title: new URL(url).hostname,
@@ -97,7 +140,7 @@ export function ImportPage() {
     const selectedPreviews = previews.filter(p => p.selected);
     if (selectedPreviews.length === 0) return toast.warning('No items selected for import.');
     const payload: ImportPayload = {
-      source: 'upload', // This can be refined based on active tab
+      source: 'upload',
       items: selectedPreviews.map(({ title, body, origin }) => ({ title, body, origin })),
     };
     mutation.mutate(payload);

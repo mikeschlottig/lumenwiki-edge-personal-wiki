@@ -1,13 +1,13 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient, useQueries } from '@tanstack/react-query';
 import { api } from '@/lib/api-client';
 import { Document } from '@shared/types';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Toaster, toast } from 'sonner';
 import { ArrowLeft, Save, Trash2, Eye, Code, Loader2, Download, Link2, CircleDot } from 'lucide-react';
@@ -18,6 +18,8 @@ import { useDebounce } from 'react-use';
 import { motion, AnimatePresence } from 'framer-motion';
 import { saveAs } from 'file-saver';
 import { extractTags } from '@/lib/worker-nlp';
+import nlp from 'compromise';
+import { useHotkeys } from 'react-hotkeys-hook';
 export function WikiEditor() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -37,6 +39,13 @@ export function WikiEditor() {
     queryFn: () => api(`/api/docs/${id}`),
     enabled: !isNew,
   });
+  const backlinkIds = doc?.backlinks?.map(b => b.docId) ?? [];
+  const backlinkQueries = useQueries({
+    queries: backlinkIds.map(backlinkId => ({
+      queryKey: ['doc', backlinkId],
+      queryFn: () => api<Document>(`/api/docs/${backlinkId}`),
+    })),
+  });
   useEffect(() => {
     if (doc) {
       setTitle(doc.title);
@@ -52,7 +61,7 @@ export function WikiEditor() {
       setTags([]);
       initialTitleRef.current = defaultTitle;
       initialBodyRef.current = '';
-      setIsDirty(true); // New notes are always dirty
+      setIsDirty(true);
     }
   }, [doc, isNew]);
   useEffect(() => {
@@ -61,6 +70,14 @@ export function WikiEditor() {
       setIsDirty(dirty);
     }
   }, [title, body, isNew]);
+  useEffect(() => {
+    if (isDirty) {
+      toast.info('Unsaved changes', { duration: 2000, id: 'dirty-toast' });
+    } else {
+      toast.dismiss('dirty-toast');
+    }
+    return () => toast.dismiss('dirty-toast');
+  }, [isDirty]);
   const mutation = useMutation({
     mutationFn: (updatedDoc: Partial<Document> & { id?: string }) => {
       setIsSaving(true);
@@ -114,10 +131,17 @@ export function WikiEditor() {
   });
   const handleAutoSave = useCallback(() => {
     if (isLoading || !isDirty) return;
-    const newTags = extractTags(title + ' ' + body);
-    mutation.mutate({ title, body, tags: newTags });
+    const baseTags = extractTags(title + ' ' + body);
+    const nounTags = nlp(title + ' ' + body).nouns().out('array').slice(0, 5);
+    const combined = Array.from(new Set([...baseTags, ...nounTags]));
+    mutation.mutate({ title, body, tags: combined });
   }, [title, body, isLoading, isDirty, mutation]);
   useDebounce(handleAutoSave, 2000, [title, body]);
+  useHotkeys('mod+s', (e) => {
+    e.preventDefault();
+    if (!isSaving) handleAutoSave();
+  }, { preventDefault: true });
+  useHotkeys('escape', () => setShowPreview(p => !p), { preventDefault: true });
   const getStatusIcon = () => {
     if (isSaving) return <><Loader2 className="size-4 animate-spin" /> Saving...</>;
     if (isDirty) return <><CircleDot className="size-4 text-blue-500" /> Unsaved</>;
@@ -164,10 +188,17 @@ export function WikiEditor() {
                   <CardContent>
                     {isLoading ? (
                       <div className="space-y-2"><Skeleton className="h-8 w-full" /><Skeleton className="h-8 w-3/4" /></div>
-                    ) : doc?.backlinks && doc.backlinks.length > 0 ? (
+                    ) : backlinkQueries.some(q => q.isLoading) ? (
+                      <div className="space-y-2"><Skeleton className="h-12 w-full" /><Skeleton className="h-12 w-full" /></div>
+                    ) : backlinkQueries.length > 0 ? (
                       <ul className="space-y-2">
-                        {doc.backlinks.map(link => (
-                          <li key={link.docId}><Link to={`/editor/${link.docId}`} className="text-sm font-medium hover:underline">{link.title}</Link></li>
+                        {backlinkQueries.map(q => q.data && (
+                          <li key={q.data.id}>
+                            <Link to={`/editor/${q.data.id}`} className="block p-2 rounded-md hover:bg-accent">
+                              <p className="font-medium text-sm">{q.data.title}</p>
+                              <p className="text-xs text-muted-foreground truncate">{q.data.body.replace(/#/g, '')}</p>
+                            </Link>
+                          </li>
                         ))}
                       </ul>
                     ) : (
