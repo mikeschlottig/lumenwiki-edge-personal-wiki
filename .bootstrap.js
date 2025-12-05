@@ -77,7 +77,14 @@ function updateWranglerJsonc() {
 }
 
 function runSetupCommands() {
-    const commands = [];
+    const commands = [
+    "bun add react-markdown@^9.0.1",
+    "bun add remark-gfm@^4.0.0",
+    "bun add turndown@^7.1.1",
+    "bun add compromise@^14.0.0",
+    "bun add react-dropzone@^14.2.3",
+    "bun add file-saver@^2.0.5"
+];
     
     if (commands.length === 0) {
         console.log('⊘ No setup commands to run');
