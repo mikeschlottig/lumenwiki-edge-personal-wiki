@@ -13,6 +13,7 @@ import { HomePage } from '@/pages/HomePage';
 import { WikiEditor } from '@/pages/WikiEditor';
 import { ImportPage } from '@/pages/ImportPage';
 import { SettingsPage } from '@/pages/SettingsPage';
+import { SearchPage } from '@/pages/SearchPage';
 import '@/index.css';
 const queryClient = new QueryClient();
 // eslint-disable-next-line react-refresh/only-export-components
@@ -43,6 +44,11 @@ const router = createBrowserRouter([
   {
     path: "/settings",
     element: <AppContainer><SettingsPage /></AppContainer>,
+    errorElement: <RouteErrorBoundary />,
+  },
+  {
+    path: "/search",
+    element: <AppContainer><SearchPage /></AppContainer>,
     errorElement: <RouteErrorBoundary />,
   },
 ]);

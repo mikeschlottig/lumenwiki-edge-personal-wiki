@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api-client';
@@ -10,7 +10,7 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Toaster, toast } from 'sonner';
-import { ArrowLeft, Save, Trash2, Eye, Code, Loader2, Download, Link2 } from 'lucide-react';
+import { ArrowLeft, Save, Trash2, Eye, Code, Loader2, Download, Link2, CircleDot } from 'lucide-react';
 import { format } from 'date-fns';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -26,9 +26,12 @@ export function WikiEditor() {
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
   const [tags, setTags] = useState<string[]>([]);
+  const [isDirty, setIsDirty] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const [showBacklinks, setShowBacklinks] = useState(true);
+  const initialTitleRef = useRef('');
+  const initialBodyRef = useRef('');
   const { data: doc, isLoading } = useQuery<Document>({
     queryKey: ['doc', id],
     queryFn: () => api(`/api/docs/${id}`),
@@ -39,12 +42,25 @@ export function WikiEditor() {
       setTitle(doc.title);
       setBody(doc.body);
       setTags(doc.tags);
+      initialTitleRef.current = doc.title;
+      initialBodyRef.current = doc.body;
+      setIsDirty(false);
     } else if (isNew) {
-      setTitle('Untitled Note');
+      const defaultTitle = 'Untitled Note';
+      setTitle(defaultTitle);
       setBody('');
       setTags([]);
+      initialTitleRef.current = defaultTitle;
+      initialBodyRef.current = '';
+      setIsDirty(true); // New notes are always dirty
     }
   }, [doc, isNew]);
+  useEffect(() => {
+    if (!isNew) {
+      const dirty = title !== initialTitleRef.current || body !== initialBodyRef.current;
+      setIsDirty(dirty);
+    }
+  }, [title, body, isNew]);
   const mutation = useMutation({
     mutationFn: (updatedDoc: Partial<Document> & { id?: string }) => {
       setIsSaving(true);
@@ -55,7 +71,11 @@ export function WikiEditor() {
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['docs'] });
+      queryClient.invalidateQueries({ queryKey: ['tags'] });
       queryClient.setQueryData(['doc', data.id], data);
+      initialTitleRef.current = data.title;
+      initialBodyRef.current = data.body;
+      setIsDirty(false);
       if (isNew) {
         navigate(`/editor/${data.id}`, { replace: true });
       }
@@ -71,6 +91,7 @@ export function WikiEditor() {
     onSuccess: () => {
       toast.success('Document deleted');
       queryClient.invalidateQueries({ queryKey: ['docs'] });
+      queryClient.invalidateQueries({ queryKey: ['tags'] });
       navigate('/');
     },
     onError: (error) => toast.error(`Failed to delete: ${error.message}`),
@@ -92,11 +113,16 @@ export function WikiEditor() {
     onError: (error) => toast.error(`Export failed: ${error.message}`),
   });
   const handleAutoSave = useCallback(() => {
-    if (isLoading || (doc && title === doc.title && body === doc.body)) return;
+    if (isLoading || !isDirty) return;
     const newTags = extractTags(title + ' ' + body);
     mutation.mutate({ title, body, tags: newTags });
-  }, [title, body, doc, isLoading, mutation]);
-  useDebounce(handleAutoSave, 1500, [title, body]);
+  }, [title, body, isLoading, isDirty, mutation]);
+  useDebounce(handleAutoSave, 2000, [title, body]);
+  const getStatusIcon = () => {
+    if (isSaving) return <><Loader2 className="size-4 animate-spin" /> Saving...</>;
+    if (isDirty) return <><CircleDot className="size-4 text-blue-500" /> Unsaved</>;
+    return <><Save className="size-4" /> Saved</>;
+  };
   if (isLoading && !isNew) {
     return <div className="center h-screen"><Loader2 className="size-8 animate-spin" /></div>;
   }
@@ -106,7 +132,7 @@ export function WikiEditor() {
         <header className="flex items-center justify-between mb-6 gap-2">
           <Button variant="ghost" size="icon" onClick={() => navigate('/')}><ArrowLeft className="size-5" /></Button>
           <div className="flex items-center gap-2 text-sm text-muted-foreground truncate">
-            {isSaving ? <><Loader2 className="size-4 animate-spin" /> Saving...</> : <><Save className="size-4" /> Saved</>}
+            {getStatusIcon()}
             {doc && <span className="hidden sm:inline">| Updated {format(new Date(doc.updatedAt), "MMM d, h:mm a")}</span>}
           </div>
           <div className="flex items-center gap-2">

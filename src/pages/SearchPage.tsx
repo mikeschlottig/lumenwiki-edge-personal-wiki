@@ -1,21 +1,17 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api-client';
 import { Document } from '@shared/types';
 import { Input } from '@/components/ui/input';
 import { DocCard, DocCardSkeleton } from '@/components/wiki/DocCard';
-import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
-import { Button } from '@/components/ui/button';
-import nlp from 'compromise';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { subDays } from 'date-fns';
 export function SearchPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const query = searchParams.get('q') || '';
   const tag = searchParams.get('tag') || '';
   const dateRange = searchParams.get('date') || '';
-  // For simplicity, we'll stick to client-side filtering.
-  // A full useInfiniteQuery would require backend pagination support.
   const { data: docs, isLoading } = useQuery<Document[]>({
     queryKey: ['docs'],
     queryFn: () => api('/api/docs'),
@@ -27,14 +23,11 @@ export function SearchPage() {
   const filteredDocs = useMemo(() => {
     if (!docs) return [];
     const lowerQuery = query.toLowerCase();
-    const expandedQuery = nlp(query).verbs().toInfinitive().out('text') + ' ' + nlp(query).nouns().toSingular().out('text');
-    const lowerExpandedQuery = expandedQuery.toLowerCase();
     return docs.filter(doc => {
       const queryMatch = lowerQuery
         ? doc.title.toLowerCase().includes(lowerQuery) ||
           doc.body.toLowerCase().includes(lowerQuery) ||
-          doc.tags.some(t => t.toLowerCase().includes(lowerQuery)) ||
-          doc.body.toLowerCase().includes(lowerExpandedQuery)
+          doc.tags.some(t => t.toLowerCase().includes(lowerQuery))
         : true;
       const tagMatch = tag ? doc.tags.includes(tag) : true;
       const dateMatch = dateRange ? (() => {
@@ -57,10 +50,6 @@ export function SearchPage() {
       return prev;
     });
   };
-  const sources = useMemo(() => {
-    if (!docs) return [];
-    return [...new Set(docs.map(d => d.source).filter(Boolean))] as string[];
-  }, [docs]);
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
       <div className="py-8 md:py-10 lg:py-12">
@@ -79,24 +68,28 @@ export function SearchPage() {
           <aside className="md:col-span-1">
             <div className="sticky top-24 space-y-6">
               <h3 className="text-lg font-semibold">Filters</h3>
-              <Accordion type="multiple" defaultValue={['tags', 'date']} className="w-full">
-                <AccordionItem value="tags">
-                  <AccordionTrigger>Tags</AccordionTrigger>
-                  <AccordionContent className="flex flex-col items-start">
-                    <Button variant="ghost" onClick={() => handleFilterChange('tag', '')} className={!tag ? 'font-bold' : ''}>All Tags</Button>
-                    {tags?.map(t => <Button variant="ghost" onClick={() => handleFilterChange('tag', t.name)} key={t.name} className={tag === t.name ? 'font-bold' : ''}>{t.name}</Button>)}
-                  </AccordionContent>
-                </AccordionItem>
-                <AccordionItem value="date">
-                  <AccordionTrigger>Date Updated</AccordionTrigger>
-                  <AccordionContent className="flex flex-col items-start">
-                    <Button variant="ghost" onClick={() => handleFilterChange('date', '')} className={!dateRange ? 'font-bold' : ''}>Any time</Button>
-                    <Button variant="ghost" onClick={() => handleFilterChange('date', '24h')} className={dateRange === '24h' ? 'font-bold' : ''}>Last 24 hours</Button>
-                    <Button variant="ghost" onClick={() => handleFilterChange('date', '7d')} className={dateRange === '7d' ? 'font-bold' : ''}>Last 7 days</Button>
-                    <Button variant="ghost" onClick={() => handleFilterChange('date', '30d')} className={dateRange === '30d' ? 'font-bold' : ''}>Last 30 days</Button>
-                  </AccordionContent>
-                </AccordionItem>
-              </Accordion>
+              <div>
+                <label className="text-sm font-medium">Tag</label>
+                <Select value={tag} onValueChange={value => handleFilterChange('tag', value === 'all' ? '' : value)}>
+                  <SelectTrigger><SelectValue placeholder="Filter by tag" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Tags</SelectItem>
+                    {tags?.map(t => <SelectItem key={t.name} value={t.name}>{t.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <label className="text-sm font-medium">Date Updated</label>
+                <Select value={dateRange} onValueChange={value => handleFilterChange('date', value === 'all' ? '' : value)}>
+                  <SelectTrigger><SelectValue placeholder="Filter by date" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Any time</SelectItem>
+                    <SelectItem value="24h">Last 24 hours</SelectItem>
+                    <SelectItem value="7d">Last 7 days</SelectItem>
+                    <SelectItem value="30d">Last 30 days</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
           </aside>
           <main className="md:col-span-3">
