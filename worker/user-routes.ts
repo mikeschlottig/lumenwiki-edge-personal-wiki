@@ -1,75 +1,117 @@
 import { Hono } from "hono";
 import type { Env } from './core-utils';
-import { UserEntity, ChatBoardEntity } from "./entities";
+import { DocumentEntity } from "./entities";
 import { ok, bad, notFound, isStr } from './core-utils';
-
+import type { Document, ImportPayload } from "@shared/types";
+import { extractTags, findLinks } from "@/lib/worker-nlp"; // Assuming worker can import from src/lib
+// A simple worker-side NLP function since we can't import from src
+const workerExtractTags = (text: string, n = 5): string[] => {
+  if (!text) return [];
+  const words = text.toLowerCase().replace(/[^a-z0-9\s-]/g, '').split(/\s+/);
+  const freq: Record<string, number> = {};
+  const stopWords = new Set(['the', 'a', 'an', 'in', 'is', 'it', 'of', 'and', 'for', 'to']);
+  words.forEach(w => {
+    if (w.length > 2 && !stopWords.has(w) && isNaN(Number(w))) {
+      freq[w] = (freq[w] || 0) + 1;
+    }
+  });
+  return Object.entries(freq).sort(([,a],[,b]) => b-a).slice(0, n).map(([word]) => word);
+};
 export function userRoutes(app: Hono<{ Bindings: Env }>) {
-  app.get('/api/test', (c) => c.json({ success: true, data: { name: 'CF Workers Demo' }}));
-
-  // USERS
-  app.get('/api/users', async (c) => {
-    await UserEntity.ensureSeed(c.env);
-    const cq = c.req.query('cursor');
-    const lq = c.req.query('limit');
-    const page = await UserEntity.list(c.env, cq ?? null, lq ? Math.max(1, (Number(lq) | 0)) : undefined);
-    return ok(c, page);
+  // --- DOCS API ---
+  app.get('/api/docs', async (c) => {
+    await DocumentEntity.ensureSeed(c.env);
+    const { items } = await DocumentEntity.list(c.env);
+    // sort by updatedAt descending
+    items.sort((a, b) => b.updatedAt - a.updatedAt);
+    return ok(c, items);
   });
-
-  app.post('/api/users', async (c) => {
-    const { name } = (await c.req.json()) as { name?: string };
-    if (!name?.trim()) return bad(c, 'name required');
-    return ok(c, await UserEntity.create(c.env, { id: crypto.randomUUID(), name: name.trim() }));
+  app.post('/api/docs', async (c) => {
+    const { title, body, source, origin } = await c.req.json<Partial<Document>>();
+    if (!isStr(title) || !isStr(body)) return bad(c, 'title and body are required');
+    const now = Date.now();
+    const newDoc: Document = {
+      id: crypto.randomUUID(),
+      title: title.trim(),
+      body: body.trim(),
+      tags: workerExtractTags(title + ' ' + body),
+      createdAt: now,
+      updatedAt: now,
+      source: source || 'editor',
+      origin: origin,
+      backlinks: [], // Backlink generation would happen here
+    };
+    await DocumentEntity.create(c.env, newDoc);
+    return ok(c, newDoc);
   });
-
-  // CHATS
-  app.get('/api/chats', async (c) => {
-    await ChatBoardEntity.ensureSeed(c.env);
-    const cq = c.req.query('cursor');
-    const lq = c.req.query('limit');
-    const page = await ChatBoardEntity.list(c.env, cq ?? null, lq ? Math.max(1, (Number(lq) | 0)) : undefined);
-    return ok(c, page);
+  app.get('/api/docs/:id', async (c) => {
+    const id = c.req.param('id');
+    const doc = new DocumentEntity(c.env, id);
+    if (!await doc.exists()) return notFound(c, 'document not found');
+    return ok(c, await doc.getState());
   });
-
-  app.post('/api/chats', async (c) => {
-    const { title } = (await c.req.json()) as { title?: string };
-    if (!title?.trim()) return bad(c, 'title required');
-    const created = await ChatBoardEntity.create(c.env, { id: crypto.randomUUID(), title: title.trim(), messages: [] });
-    return ok(c, { id: created.id, title: created.title });
+  app.put('/api/docs/:id', async (c) => {
+    const id = c.req.param('id');
+    const { title, body } = await c.req.json<Partial<Document>>();
+    if (!isStr(title) && !isStr(body)) return bad(c, 'title or body is required');
+    const doc = new DocumentEntity(c.env, id);
+    if (!await doc.exists()) return notFound(c, 'document not found');
+    const updatedDoc = await doc.mutate(current => {
+      const newBody = body ?? current.body;
+      const newTitle = title ?? current.title;
+      return {
+        ...current,
+        title: newTitle.trim(),
+        body: newBody.trim(),
+        tags: workerExtractTags(newTitle + ' ' + newBody),
+        updatedAt: Date.now(),
+      };
+    });
+    return ok(c, updatedDoc);
   });
-
-  // MESSAGES
-  app.get('/api/chats/:chatId/messages', async (c) => {
-    const chat = new ChatBoardEntity(c.env, c.req.param('chatId'));
-    if (!await chat.exists()) return notFound(c, 'chat not found');
-    return ok(c, await chat.listMessages());
+  app.delete('/api/docs/:id', async (c) => {
+    const id = c.req.param('id');
+    const deleted = await DocumentEntity.delete(c.env, id);
+    return ok(c, { id, deleted });
   });
-
-  app.post('/api/chats/:chatId/messages', async (c) => {
-    const chatId = c.req.param('chatId');
-    const { userId, text } = (await c.req.json()) as { userId?: string; text?: string };
-    if (!isStr(userId) || !text?.trim()) return bad(c, 'userId and text required');
-    const chat = new ChatBoardEntity(c.env, chatId);
-    if (!await chat.exists()) return notFound(c, 'chat not found');
-    return ok(c, await chat.sendMessage(userId, text.trim()));
+  app.post('/api/docs/import', async (c) => {
+    const payload = await c.req.json<ImportPayload>();
+    if (!payload || !payload.items || !Array.isArray(payload.items)) {
+      return bad(c, 'Invalid import payload');
+    }
+    const createdDocs: Document[] = [];
+    for (const item of payload.items) {
+      if (!isStr(item.title) || !isStr(item.body)) continue;
+      const now = Date.now();
+      const newDoc: Document = {
+        id: crypto.randomUUID(),
+        title: item.title.trim(),
+        body: item.body.trim(),
+        tags: workerExtractTags(item.title + ' ' + item.body),
+        createdAt: now,
+        updatedAt: now,
+        source: payload.source,
+        origin: item.origin,
+        backlinks: [],
+      };
+      await DocumentEntity.create(c.env, newDoc);
+      createdDocs.push(newDoc);
+    }
+    return ok(c, { createdCount: createdDocs.length, items: createdDocs });
   });
-
-  // DELETE: Users
-  app.delete('/api/users/:id', async (c) => ok(c, { id: c.req.param('id'), deleted: await UserEntity.delete(c.env, c.req.param('id')) }));
-
-  app.post('/api/users/deleteMany', async (c) => {
-    const { ids } = (await c.req.json()) as { ids?: string[] };
-    const list = ids?.filter(isStr) ?? [];
-    if (list.length === 0) return bad(c, 'ids required');
-    return ok(c, { deletedCount: await UserEntity.deleteMany(c.env, list), ids: list });
-  });
-
-  // DELETE: Chats
-  app.delete('/api/chats/:id', async (c) => ok(c, { id: c.req.param('id'), deleted: await ChatBoardEntity.delete(c.env, c.req.param('id')) }));
-
-  app.post('/api/chats/deleteMany', async (c) => {
-    const { ids } = (await c.req.json()) as { ids?: string[] };
-    const list = ids?.filter(isStr) ?? [];
-    if (list.length === 0) return bad(c, 'ids required');
-    return ok(c, { deletedCount: await ChatBoardEntity.deleteMany(c.env, list), ids: list });
+  app.get('/api/docs/tags', async (c) => {
+    await DocumentEntity.ensureSeed(c.env);
+    const { items } = await DocumentEntity.list(c.env);
+    const tagCounts: Record<string, number> = {};
+    items.forEach(doc => {
+      doc.tags.forEach(tag => {
+        tagCounts[tag] = (tagCounts[tag] || 0) + 1;
+      });
+    });
+    const topTags = Object.entries(tagCounts)
+      .sort(([, a], [, b]) => b - a)
+      .slice(0, 10)
+      .map(([name, count]) => ({ name, count }));
+    return ok(c, topTags);
   });
 }
