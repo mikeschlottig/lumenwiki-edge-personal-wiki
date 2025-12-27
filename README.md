@@ -1,6 +1,6 @@
 # LumenWiki — Edge Personal Wiki
 
-[cloudflarebutton]
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/mikeschlottig/lumenwiki-edge-personal-wiki)
 
 LumenWiki is a personal Wiki built to run on Cloudflare Workers + Durable Object storage. It provides a clean, minimalist editor and dashboard with a collapsible left-side vault panel, fast import (single & bulk), paste/upload support, auto-generated metadata stamps (createdAt, updatedAt, source, import-origin), and automatic tagging & bidirectional linking. Documents are stored as markdown/plain-text with searchable metadata and relationships.
 
@@ -109,7 +109,7 @@ Deploy to Cloudflare Workers for global edge deployment:
 
 For one-click deployment:
 
-[cloudflarebutton]
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/mikeschlottig/lumenwiki-edge-personal-wiki)
 
 ### Custom Domain
 After deployment, add a custom domain via the Cloudflare dashboard under Workers > Your Worker > Triggers > Custom Domain.
